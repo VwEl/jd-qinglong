@@ -23,6 +23,10 @@ public class QLConfig {
     private String qlClientSecret;
 
     private QLToken qlToken;
+    //最大容量
+    private int capacity = 99;
+    //当前剩余多少
+    private int remain = 99;
 
     public boolean isValid() {
         boolean verify1 = !StringUtils.isEmpty(qlUrl);
@@ -35,14 +39,24 @@ public class QLConfig {
         /*
             用户名密码登录
          */
-        USERNAME_PASSWORD,
+        USERNAME_PASSWORD("用户名密码"),
         /*
             OpenApi登录
          */
-        TOKEN;
+        TOKEN("openId");
+
+        private String desc;
+
+        QLLoginType(String desc) {
+            this.desc = desc;
+        }
+
+        public String getDesc() {
+            return desc;
+        }
     }
 
-    private QLConfig.QLLoginType qlLoginType;
+    private QLLoginType qlLoginType;
 
 
 }

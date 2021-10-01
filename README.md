@@ -1,3 +1,8 @@
+## **功能：**
+1. 手机验证码获取X东CK，CK有效期默认一个月 
+2. 对接青龙面板，多青龙选择上传
+3. 对接xdd-plus
+
 <p align="center">
   用于替代Ninja【代码仅供参考学习，禁止商用和非法用途，否则，一切后果请用户自负。】
 </p>
@@ -16,28 +21,33 @@
 [docker-image-size-url]: https://hub.docker.com/r/rubyangxg/jd-qinglong
 </div>
 
-<p align="center">
-  <img width="49%" src="/public/images/home.png">
-</p>
-
 ## 提醒一下
-* arm的设备不用试了，没时间测试和解决遇到的问题
-* 请选择性能好的设备运行，最好是云服务器或pc、x86软路由、群晖
-* 选择Openid方式登录的，确保青龙版本>=2.9，并且创建了应用。
+* arm的设备不用试了，这个比较麻烦，还不一定好用，放弃了。
+* 请选择性能好的设备运行，最好是云服务器或pc、x86软路由、群晖。
+* 只支持青龙2.9+，2.8可能会出现无法上传问题。
 * 本项目可以不依赖青龙运行，获取的CK需网页上手工复制
-* 查看日志的命令有三个，具体含义自行学习：
- 1. `docker-compose --env-file env.properties logs -f webapp`
- 2. `docker-compose --env-file env.properties logs -f`
- 3. `docker logs -f webapp`
 
 ## 更新历史
-* 2021-09-15 更新上传多青龙支持，最多5个，升级后请仔细阅读 [env.template.properties](https://raw.githubusercontent.com/rubyangxg/jd-qinglong/master/env.template.properties) 里面的注释
+* 2021-09-28 增加qq面板交互，自定义标题，自定义公告栏吗，重构代码
+* 2021-09-25 解决配置资源数低，或其他情况下启动后显示无青龙配置bug，如果都正常就不需要更新。更新命令看[INSTALL.md](INSTALL.md)
+* 2021-09-21 优化资源回收创建流程，优化资源404时间过长
+* 2021-09-18 新增推送功能，配置同青龙，请查看[env.template.properties](https://raw.githubusercontent.com/rubyangxg/jd-qinglong/master/env.template.properties)
+
+[comment]: <> (* 2021-09-17 解决验证码输入后登录按钮无效问题，请升级成allinone镜像)
+
+[comment]: <> (* 2021-09-17 推出allinone镜像，无需其他依赖，升级的话只修改docker-compose.yml即可)
+
+[comment]: <> (* 2021-09-16 bug fix 解决了卡验证码问题，请务必pull最新镜像)
+
+[comment]: <> (*            增加实验功能：支持配置最多上传ck容量)
+
+[comment]: <> (* 2021-09-15 更新上传多青龙支持，最多5个，升级后请仔细阅读 [env.template.properties]&#40;https://raw.githubusercontent.com/rubyangxg/jd-qinglong/master/env.template.properties&#41; 里面的注释)
 
 ## 如何安装
 * [源码地址](https://github.com/rubyangxg/jd-qinglong)
-* 已经安装好青龙的: [INSTALL1.md](INSTALL1.md)
-* 从0搭建: [INSTALL2.md](INSTALL2.md)
-* 免费代挂及问题反馈移步: [TG交流群](https://t.me/joinchat/3JfrwNPoHFY2MGNl)
+* **群晖**安装参考源码路径下的 **jd-qinglong-群晖安装教程.pdf**
+* 新版本安装教程: [INSTALL.md](INSTALL.md)
+* 问题反馈移步: [TG交流群](https://t.me/joinchat/3JfrwNPoHFY2MGNl)
 
 ## 多谢
 

@@ -1,6 +1,5 @@
 package com.meread.selenium;
 
-import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.meread.selenium.bean.*;
 import com.meread.selenium.util.FreemarkerUtils;
@@ -11,17 +10,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
-import org.springframework.util.StringUtils;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.ResponseBody;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.view.freemarker.FreeMarkerConfigurer;
 
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
+import javax.servlet.http.HttpSession;
 import java.io.IOException;
-import java.util.*;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -36,36 +32,43 @@ public class HelloController {
     private JDService service;
 
     @Autowired
-    private WebDriverFactory factory;
+    private WebDriverManager factory;
 
     @Autowired
     private FreeMarkerConfigurer freeMarkerConfigurer;
 
+    @RequestMapping("/websocket")
+    public String getWebSocket() {
+        return "ws";
+    }
+
     @GetMapping(value = "/getScreen")
     @ResponseBody
-    public JDScreenBean getScreen(@RequestParam("clientSessionId") String clientSessionId) {
-        String sessionId = factory.assignSessionId(clientSessionId, false, null).getAssignSessionId();
-        if (sessionId == null) {
-            return new JDScreenBean("", JDScreenBean.PageStatus.SESSION_EXPIRED);
+    public JDScreenBean getScreen(HttpSession session) {
+        MyChromeClient myChromeClient = factory.getCacheMyChromeClient(session.getId());
+        if (myChromeClient == null) {
+            return new JDScreenBean("", "", JDScreenBean.PageStatus.SESSION_EXPIRED);
         }
-        JDScreenBean screen = service.getScreen(sessionId);
+        JDScreenBean screen = service.getScreen(myChromeClient);
         if (screen.getPageStatus().equals(JDScreenBean.PageStatus.SUCCESS_CK)) {
-            log.info("已经获取到ck了 " + sessionId + ", ck = " + screen.getCk());
+            log.info("已经获取到ck了 " + myChromeClient + ", ck = " + screen.getCk());
+            String xddRes = service.doXDDNotify(screen.getCk().toString());
+            log.info("doXDDNotify res = " + xddRes);
         }
         return screen;
     }
 
     @GetMapping(value = "/sendAuthCode")
     @ResponseBody
-    public JDOpResultBean sendAuthCode(@RequestParam("clientSessionId") String clientSessionId) {
+    public JDOpResultBean sendAuthCode(HttpSession session) {
         try {
-            String sessionId = factory.assignSessionId(clientSessionId, false, null).getAssignSessionId();
-            if (sessionId == null) {
-                JDScreenBean screen = new JDScreenBean("", JDScreenBean.PageStatus.SESSION_EXPIRED);
+            MyChromeClient myChromeClient = factory.getCacheMyChromeClient(session.getId());
+            if (myChromeClient == null) {
+                JDScreenBean screen = new JDScreenBean("", "", JDScreenBean.PageStatus.SESSION_EXPIRED);
                 return new JDOpResultBean(screen, false);
             }
-            boolean success = service.sendAuthCode(sessionId);
-            JDScreenBean screen = service.getScreen(sessionId);
+            boolean success = service.sendAuthCode(myChromeClient);
+            JDScreenBean screen = service.getScreen(myChromeClient);
             if (screen.getPageStatus() != JDScreenBean.PageStatus.NORMAL) {
                 success = false;
             }
@@ -73,23 +76,23 @@ public class HelloController {
         } catch (IOException | InterruptedException e) {
             e.printStackTrace();
         }
-        return new JDOpResultBean(new JDScreenBean("", JDScreenBean.PageStatus.INTERNAL_ERROR), false);
+        return new JDOpResultBean(new JDScreenBean("", "", JDScreenBean.PageStatus.INTERNAL_ERROR), false);
     }
 
     @GetMapping(value = "/crackCaptcha")
     @ResponseBody
-    public JDOpResultBean crackCaptcha(@RequestParam("clientSessionId") String clientSessionId) {
+    public JDOpResultBean crackCaptcha(HttpSession session) {
         boolean crackSuccess = false;
         //请求一个sessionId
-        String sessionId = factory.assignSessionId(clientSessionId, false, null).getAssignSessionId();
-        if (sessionId == null) {
-            return new JDOpResultBean(service.getScreen(sessionId), false);
+        MyChromeClient myChromeClient = factory.getCacheMyChromeClient(session.getId());
+        if (myChromeClient == null) {
+            return new JDOpResultBean(service.getScreen(myChromeClient), false);
         }
 
         CompletableFuture<Boolean> future = CompletableFuture.supplyAsync(() -> {
             try {
-                service.crackCaptcha(sessionId);
-                JDScreenBean screen = service.getScreen(sessionId);
+                service.crackCaptcha(myChromeClient);
+                JDScreenBean screen = service.getScreen(myChromeClient);
                 if (screen.getPageStatus() != JDScreenBean.PageStatus.REQUIRE_VERIFY) {
                     return true;
                 }
@@ -105,82 +108,80 @@ public class HelloController {
             }
         } catch (Exception ignored) {
         }
-        return new JDOpResultBean(service.getScreen(sessionId), crackSuccess);
+        return new JDOpResultBean(service.getScreen(myChromeClient), crackSuccess);
     }
 
     @GetMapping({"/"})
-    public String index(HttpServletRequest httpRequest, Model model) {
-        String debug = httpRequest.getParameter("debug");
-        String servletSessionId = httpRequest.getSession().getId();
+    public String index(
+            @RequestParam(defaultValue = "phone") String jdLoginType,
+            @RequestParam(defaultValue = "0") String reset,
+            HttpSession session, Model model) {
         model.addAttribute("debug", this.debug);
-        int qlUploadDirect = qlUploadDirect();
+        int qlUploadDirect = service.getQLUploadDirectConfig();
         model.addAttribute("qlUploadDirect", qlUploadDirect);
-        if (!StringUtils.isEmpty(debug)) {
-            int i = Integer.parseInt(debug);
-            model.addAttribute("debug", i == 1);
+        model.addAttribute("qlConfigs", factory.getQlConfigs());
+        model.addAttribute("initSuccess", factory.isInitSuccess());
+        model.addAttribute("indexNotice", factory.getProperties().getProperty("INDEX.NOTICE"));
+        model.addAttribute("indexTitle", factory.getProperties().getProperty("INDEX.TITLE"));
+
+        try {
+            JDLoginType.valueOf(jdLoginType);
+        } catch (IllegalArgumentException e) {
+            jdLoginType = "phone";
         }
-        //请求一个sessionId
-        AssignSessionIdStatus status = factory.assignSessionId(httpRequest.getParameter("clientSessionId"), true, servletSessionId);
-        log.info("index : " + JSON.toJSONString(status));
-        if (status.getAssignSessionId() == null) {
-            //分配sessionid失败
-            //使前端垃圾cookie失效
-            if (status.getClientSessionId() != null) {
-                log.info("pre release : " + JSON.toJSONString(status));
-                factory.releaseWebDriver(status.getClientSessionId());
-            }
-            model.addAttribute("error", true);
+        model.addAttribute("jdLoginType", jdLoginType);
+
+        if (!factory.isInitSuccess()) {
             return "login";
-        } else {
-            if (status.isNew()) {
-                factory.bindSessionId(status.getAssignSessionId());
-            }
         }
 
-        String reset = httpRequest.getParameter("reset");
-        if ("1".equals(reset)) {
-            service.reset(status.getAssignSessionId());
+        String servletSessionId = session.getId();
+        MyChromeClient cacheMyChromeClient = factory.getCacheMyChromeClient(servletSessionId);
+        if (cacheMyChromeClient == null) {
+            cacheMyChromeClient = factory.createNewMyChromeClient(servletSessionId, LoginType.WEB, JDLoginType.valueOf(jdLoginType));
         }
-        String ck = null;
+
+        if (cacheMyChromeClient == null) {
+            model.addAttribute("error", "1");
+            return "login";
+        } else {
+            cacheMyChromeClient.setJdLoginType(JDLoginType.valueOf(jdLoginType));
+        }
+
+        if ("1".equals(reset)) {
+            boolean b = service.toJDlogin(cacheMyChromeClient);
+            if (!b) {
+                log.error("跳转登录页失败");
+            }
+        }
+        JDCookie ck;
         try {
-            ck = service.getJDCookies(status.getAssignSessionId());
-            if (!StringUtils.isEmpty(ck)) {
-                model.addAttribute("ck", ck);
+            ck = service.getJDCookies(cacheMyChromeClient);
+            if (!ck.isEmpty()) {
+                model.addAttribute("ck", ck.toString());
             } else {
-                service.toJDlogin(status.getAssignSessionId());
+                boolean b = service.toJDlogin(cacheMyChromeClient);
+                if (!b) {
+                    log.error("跳转登录页失败");
+                }
             }
         } catch (Exception e) {
             e.printStackTrace();
-            log.error("getJDCookies " + status.getAssignSessionId() + " error!");
-            factory.unBindSessionId(status.getAssignSessionId(), servletSessionId);
+            log.error("getJDCookies " + cacheMyChromeClient.getUserTrackId() + " error!");
         }
-        model.addAttribute("clientSessionId", status.getAssignSessionId());
         return "login";
-    }
-
-    private int qlUploadDirect() {
-        String ql_upload_direct = System.getenv("QL_UPLOAD_DIRECT");
-        int qlUploadDirect = 0;
-        if (!StringUtils.isEmpty(ql_upload_direct)) {
-            try {
-                qlUploadDirect = Integer.parseInt(ql_upload_direct);
-            } catch (NumberFormatException e) {
-            }
-        }
-        return qlUploadDirect;
     }
 
     @PostMapping({"/jdLogin"})
     @ResponseBody
-    public String login(@RequestParam("clientSessionId") String clientSessionId, HttpServletResponse response, @RequestParam("phone") String phone,
-                        @RequestParam("sms_code") String sms_code, Model model) {
+    public String login(HttpSession session, @RequestParam("phone") String phone) {
         // 在session中保存用户信息
-        String sessionId = factory.assignSessionId(clientSessionId, false, null).getAssignSessionId();
-        if (sessionId == null) {
+        MyChromeClient cacheMyChromeClient = factory.getCacheMyChromeClient(session.getId());
+        if (cacheMyChromeClient == null) {
             return "-1";
         }
         try {
-            service.jdLogin(sessionId);
+            service.jdLogin(cacheMyChromeClient);
             return phone;
         } catch (IOException | InterruptedException e) {
             e.printStackTrace();
@@ -190,71 +191,34 @@ public class HelloController {
 
     @PostMapping({"/uploadQingLong"})
     @ResponseBody
-    public JSONObject uploadQingLong(@RequestParam(value = "chooseQLId", required = false) Set<Integer> chooseQLId, @RequestParam("clientSessionId") String clientSessionId, @RequestParam(value = "phone", defaultValue = "无手机号") String phone, @RequestParam("ck") String ck, HttpServletResponse response) {
-        JSONObject jsonObject = new JSONObject();
-        jsonObject.put("status", 0);
-
-        // 在session中保存用户信息
-        String sessionId = factory.assignSessionId(clientSessionId, false, null).getAssignSessionId();
-        if (sessionId == null) {
+    public JSONObject uploadQingLong(@RequestParam(value = "chooseQLId", required = false) Set<Integer> chooseQLId,
+                                     @RequestParam(value = "phone", defaultValue = "无手机号") String phone,
+                                     @RequestParam(value = "remark", defaultValue = "") String remark,
+                                     @RequestParam("ck") String ck,
+                                     HttpSession httpSession) {
+        MyChromeClient cacheMyChromeClient = factory.getCacheMyChromeClient(httpSession.getId());
+        if (cacheMyChromeClient == null) {
+            JSONObject jsonObject = new JSONObject();
+            jsonObject.put("status", 0);
             return jsonObject;
         }
-        int qlUploadDirect = qlUploadDirect();
-
-        if ((chooseQLId != null && chooseQLId.size() > 0) || qlUploadDirect == 1) {
-            List<QLUploadStatus> uploadStatuses = new ArrayList<>();
-            try {
-                if (factory.getQlConfigs() != null) {
-                    for (QLConfig qlConfig : factory.getQlConfigs()) {
-                        if (qlUploadDirect == 1 || chooseQLId.contains(qlConfig.getId())) {
-                            if (qlConfig.getQlLoginType() == QLConfig.QLLoginType.TOKEN) {
-                                int i = service.uploadQingLongWithToken(ck, phone, qlConfig);
-                                uploadStatuses.add(new QLUploadStatus(qlConfig, i > 0));
-                            }
-                            if (qlConfig.getQlLoginType() == QLConfig.QLLoginType.USERNAME_PASSWORD) {
-                                int i = service.uploadQingLong(sessionId, ck, phone, qlConfig);
-                                uploadStatuses.add(new QLUploadStatus(qlConfig, i > 0));
-                            }
-                        }
-                    }
-                }
-            } finally {
-                factory.releaseWebDriver(sessionId);
-            }
-
-            if (qlUploadDirect != 1) {
-                Map<String, Object> map = new HashMap<>();
-                map.put("uploadStatuses", uploadStatuses);
-                try {
-                    Template template = freeMarkerConfigurer.getConfiguration().getTemplate("fragment/uploadRes.ftl");
-                    String process = FreemarkerUtils.process(template, map);
-                    log.debug(process);
-                    jsonObject.put("html", process);
-                    jsonObject.put("status", 1);
-                } catch (IOException | TemplateException e) {
-                    e.printStackTrace();
-                }
-            } else {
-                jsonObject.put("status", 2);
-            }
-
-        } else {
-            jsonObject.put("status", 0);
-        }
-        return jsonObject;
+        int qlUploadDirect = service.getQLUploadDirectConfig();
+        return service.uploadQingLong(chooseQLId, phone, remark, ck, cacheMyChromeClient.getChromeSessionId(), qlUploadDirect);
     }
 
     @PostMapping({"/chooseQingLong"})
     @ResponseBody
-    public JSONObject chooseQingLong(@RequestParam("clientSessionId") String clientSessionId, @RequestParam(value = "phone", defaultValue = "无手机号") String phone, @RequestParam("ck") String ck) {
+    public JSONObject chooseQingLong(@RequestParam(value = "phone", defaultValue = "无手机号") String phone,
+                                     @RequestParam(value = "remark", defaultValue = "") String remark,
+                                     @RequestParam("ck") String ck) {
         JSONObject jsonObject = new JSONObject();
         jsonObject.put("status", 0);
         Map<String, Object> map = new HashMap<>();
         if (factory.getQlConfigs() != null && !factory.getQlConfigs().isEmpty()) {
             map.put("qlConfigs", factory.getQlConfigs());
-            map.put("clientSessionId", clientSessionId);
             map.put("phone", phone);
             map.put("ck", ck);
+            map.put("remark", remark);
             try {
                 Template template = freeMarkerConfigurer.getConfiguration().getTemplate("fragment/chooseQL.ftl");
                 String process = FreemarkerUtils.process(template, map);
@@ -270,24 +234,24 @@ public class HelloController {
 
     @GetMapping({"/releaseSession"})
     @ResponseBody
-    public int releaseSession(@RequestParam("clientSessionId") String clientSessionId) {
+    public int releaseSession(HttpSession session) {
         // 在session中保存用户信息
-        String sessionId = factory.assignSessionId(clientSessionId, false, null).getAssignSessionId();
-        if (sessionId == null) {
+        MyChromeClient myChromeClient = factory.getCacheMyChromeClient(session.getId());
+        if (myChromeClient == null) {
             return -1;
         }
-        factory.releaseWebDriver(sessionId);
+        factory.releaseWebDriver(myChromeClient.getChromeSessionId());
         return 1;
     }
 
     @PostMapping(value = "/control")
     @ResponseBody
-    public int control(@RequestParam("currId") String currId, @RequestParam("currValue") String currValue, @RequestParam("clientSessionId") String clientSessionId) {
-        String sessionId = factory.assignSessionId(clientSessionId, false, null).getAssignSessionId();
-        if (sessionId == null) {
+    public int control(@RequestParam("currId") String currId, @RequestParam("currValue") String currValue, HttpSession session) {
+        MyChromeClient myChromeClient = factory.getCacheMyChromeClient(session.getId());
+        if (myChromeClient == null) {
             return -1;
         }
-        service.controlChrome(sessionId, currId, currValue);
+        service.controlChrome(myChromeClient, currId, currValue);
         return 1;
     }
 

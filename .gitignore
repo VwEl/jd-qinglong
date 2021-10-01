@@ -162,4 +162,7 @@ target
 .idea
 
 env.properties
-docker-compose-debug.yml
+qqbot
+docker-allinone/notify
+.docker
+.DS_Store
